@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Schedule Creator Test UI</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin-bottom: 20px; }
+        textarea { width: 300px; height: 80px; }
+        .status { color: red; }
+        .entry { margin: 5px 0; }
+    </style>
+</head>
+<body>
+    <h1>Schedule Creator Test UI</h1>
+    
+    <div class="section">
+        <h2>Add Patient</h2>
+        <form method="POST">
+            <input type="hidden" name="action" value="add_patient">
+            <p>Name: <input type="text" name="patient_name"></p>
+            <p>Speech Therapist Hours: <input type="text" name="speech_hours" value="0"></p>
+            <p>Psychologist Hours: <input type="text" name="psycho_hours" value="0"></p>
+            <p>Occupational Therapist Hours: <input type="text" name="occ_hours" value="0"></p>
+            <p>Availability (e.g., Monday: 08:00, 08:30):</p>
+            <textarea name="patient_availability"></textarea>
+            <p><input type="submit" value="Add Patient"></p>
+        </form>
+    </div>
+    
+    <div class="section">
+        <h2>Add Therapist</h2>
+        <form method="POST">
+            <input type="hidden" name="action" value="add_therapist">
+            <p>Name: <input type="text" name="therapist_name"></p>
+            <p>Specialty: 
+                <select name="specialty">
+                    <option value="Speech Therapist">Speech Therapist</option>
+                    <option value="Psychologist">Psychologist</option>
+                    <option value="Occupational Therapist">Occupational Therapist</option>
+                </select>
+            </p>
+            <p>Availability (e.g., Monday: 08:00, 08:30):</p>
+            <textarea name="therapist_availability"></textarea>
+            <p><input type="submit" value="Add Therapist"></p>
+        </form>
+    </div>
+    
+    <div class="section">
+        <form method="POST">
+            <input type="hidden" name="action" value="run_scheduler">
+            <input type="submit" value="Run Scheduler">
+        </form>
+    </div>
+    
+    <div class="section">
+        <h2>Current Entries</h2>
+        <p><strong>Patients:</strong></p>
+        <ul>
+            {% for patient in patients %}
+                <li class="entry">
+                    {{ patient.name }} (ID: {{ patient.id }}) - Needs: {{ patient.weekly_specialty_needs }}
+                    <form method="POST" style="display:inline;">
+                        <input type="hidden" name="action" value="delete_patient">
+                        <input type="hidden" name="patient_id" value="{{ patient.id }}">
+                        <input type="submit" value="Delete" onclick="return confirm('Delete {{ patient.name }}?');">
+                    </form>
+                </li>
+            {% endfor %}
+        </ul>
+        <p><strong>Therapists:</strong></p>
+        <ul>
+            {% for therapist in therapists %}
+                <li class="entry">
+                    {{ therapist.name }} ({{ therapist.specialty }}) (ID: {{ therapist.id }})
+                    <form method="POST" style="display:inline;">
+                        "input type="hidden" name="action" value="delete_therapist">
+                        <input type="hidden" name="therapist_id" value="{{ therapist.id }}">
+                        <input type="submit" value="Delete" onclick="return confirm('Delete {{ therapist.name }}?');">
+                    </form>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+    
+    {% if status %}
+        <p class="status">{{ status }}</p>
+    {% endif %}
+</body>
+</html>
