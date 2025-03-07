@@ -57,9 +57,12 @@ def get_hour_slot(start_time: float) -> HourSlot:
 
 def create_schedule(patients: List[Patient], therapists: List[Therapist], timeslots: List[dict]) -> List[tuple]:
     model = cp_model.CpModel()
-    bonus_weight = 1  # Weight for the consecutive scheduling bonus
 
-    # Create consultation variables
+    # We use these weights for the soft rules.
+    bonus_weight = 1              # bonus for any consecutive appointment
+    same_bonus_weight = 1         # bonus for consecutive appointments with the same therapist
+
+    # Create consultation decision variables.
     consultations = []
     for patient in patients:
         for therapist in therapists:
@@ -69,7 +72,7 @@ def create_schedule(patients: List[Patient], therapists: List[Therapist], timesl
                     consultation = model.NewBoolVar(var_name)
                     consultations.append((consultation, patient, therapist, timeslot))
 
-    # Availability constraints
+    # Enforce availability: if a patient or therapist is not available in a given timeslot, force the variable to 0.
     for consultation, patient, therapist, timeslot in consultations:
         day = timeslot["day_of_week"]
         hour_slot = get_hour_slot(timeslot["start_time"])
@@ -78,7 +81,7 @@ def create_schedule(patients: List[Patient], therapists: List[Therapist], timesl
         if not (patient_available and therapist_available):
             model.Add(consultation == 0)
 
-    # No double-booking constraints (for each timeslot, a patient and a therapist can have at most one consultation)
+    # Prevent double-booking: for each timeslot, a patient and a therapist can have at most one consultation.
     for timeslot in timeslots:
         for therapist in therapists:
             overlapping = [c for c, p, t, ts in consultations if t == therapist and ts == timeslot]
@@ -87,7 +90,7 @@ def create_schedule(patients: List[Patient], therapists: List[Therapist], timesl
             overlapping = [c for c, p, t, ts in consultations if p == patient and ts == timeslot]
             model.Add(sum(overlapping) <= 1)
 
-    # Weekly needs constraints: For each patient and specialty, schedule exactly the required number of consultations.
+    # Weekly needs constraints: each patient must have exactly the required number of consultations for each specialty.
     for patient in patients:
         for specialty, hours_needed in patient.weekly_specialty_needs.items():
             if hours_needed > 0:
@@ -96,13 +99,12 @@ def create_schedule(patients: List[Patient], therapists: List[Therapist], timesl
                     print(f"Warning: No consultations possible for {patient.name} with {specialty}")
                 model.Add(sum(relevant_consultations) == hours_needed)
 
-    # ***** Soft Constraint for Consecutive Appointments *****
-    # First, create auxiliary variables that indicate whether a patient is scheduled in a given timeslot.
-    scheduled = {}  # key: (patient.id, timeslot["id"]) -> IntVar in {0,1}
+    # ***** Soft Constraint for Consecutive Appointments (regardless of therapist) *****
+    # For each patient and each timeslot, create an auxiliary variable that indicates if a patient is scheduled.
+    scheduled = {}  # key: (patient.id, timeslot["id"]) -> IntVar (0 or 1)
     for patient in patients:
         for ts in timeslots:
             var = model.NewIntVar(0, 1, f'scheduled_{patient.id}_{ts["id"]}')
-            # Sum over all consultations for this patient in this timeslot (at most one due to double-booking).
             relevant = [c for c, p, t, ts_candidate in consultations if p == patient and ts_candidate == ts]
             if relevant:
                 model.Add(var == sum(relevant))
@@ -110,40 +112,73 @@ def create_schedule(patients: List[Patient], therapists: List[Therapist], timesl
                 model.Add(var == 0)
             scheduled[(patient.id, ts["id"])] = var
 
-    # For each patient and each day, reward consecutive appointments.
-    bonus_vars = []
     # Group timeslots by day.
     timeslots_by_day = {}
     for ts in timeslots:
         day = ts["day_of_week"]
         timeslots_by_day.setdefault(day, []).append(ts)
-    # Sort timeslots by start time for each day.
     for day, ts_list in timeslots_by_day.items():
         ts_list.sort(key=lambda x: x["start_time"])
+
+    bonus_vars = []
     # For each patient and each day, for each adjacent pair of timeslots, create a bonus variable.
     for patient in patients:
-        for day, ts_list in timeslots_by_day.items():
-            # Only consider days where the patient is available (or could be scheduled).
-            if day not in patient.availability:
-                continue
-            for i in range(len(ts_list) - 1):
-                ts1 = ts_list[i]
-                ts2 = ts_list[i+1]
-                bonus_var = model.NewIntVar(0, 1, f'bonus_{patient.id}_{ts1["id"]}_{ts2["id"]}')
-                s1 = scheduled[(patient.id, ts1["id"])]
-                s2 = scheduled[(patient.id, ts2["id"])]
-                # Linearize the product: bonus_var == 1 if and only if both s1 and s2 are 1.
-                model.Add(bonus_var <= s1)
-                model.Add(bonus_var <= s2)
-                model.Add(bonus_var >= s1 + s2 - 1)
-                bonus_vars.append(bonus_var)
+        if any(day in patient.availability for day in timeslots_by_day):
+            for day, ts_list in timeslots_by_day.items():
+                if day not in patient.availability:
+                    continue
+                for i in range(len(ts_list) - 1):
+                    ts1 = ts_list[i]
+                    ts2 = ts_list[i+1]
+                    bonus_var = model.NewIntVar(0, 1, f'bonus_{patient.id}_{ts1["id"]}_{ts2["id"]}')
+                    s1 = scheduled[(patient.id, ts1["id"])]
+                    s2 = scheduled[(patient.id, ts2["id"])]
+                    model.Add(bonus_var <= s1)
+                    model.Add(bonus_var <= s2)
+                    model.Add(bonus_var >= s1 + s2 - 1)
+                    bonus_vars.append(bonus_var)
+
+    # ***** Soft Constraint for Consecutive Appointments with the Same Therapist *****
+    # Create a helper dictionary for fast lookup: (patient.id, therapist.id, timeslot["id"]) -> consultation variable.
+    consultation_dict = {}
+    for c, p, t, ts in consultations:
+        consultation_dict[(p.id, t.id, ts["id"])] = c
+
+    same_therapist_bonus_vars = []
+    # For each patient, each therapist, and each day, for every adjacent pair of timeslots,
+    # add a bonus if both appointments with that therapist are scheduled.
+    for patient in patients:
+        for therapist in therapists:
+            for day, ts_list in timeslots_by_day.items():
+                # Only consider if the patient could be scheduled on that day.
+                if day not in patient.availability:
+                    continue
+                for i in range(len(ts_list) - 1):
+                    ts1 = ts_list[i]
+                    ts2 = ts_list[i+1]
+                    key1 = (patient.id, therapist.id, ts1["id"])
+                    key2 = (patient.id, therapist.id, ts2["id"])
+                    # Only add bonus if the consultation variables exist.
+                    if key1 in consultation_dict and key2 in consultation_dict:
+                        c1 = consultation_dict[key1]
+                        c2 = consultation_dict[key2]
+                        bonus_var = model.NewIntVar(0, 1, f'same_bonus_{patient.id}_{therapist.id}_{ts1["id"]}_{ts2["id"]}')
+                        model.Add(bonus_var <= c1)
+                        model.Add(bonus_var <= c2)
+                        model.Add(bonus_var >= c1 + c2 - 1)
+                        same_therapist_bonus_vars.append(bonus_var)
 
     # Modify the objective.
     # The sum over scheduled consultations is fixed by the hard constraints.
-    # So we add the bonus terms to encourage consecutive appointments.
-    model.Maximize(sum(c for c, p, t, ts in consultations) + bonus_weight * sum(bonus_vars))
+    # We add both bonus terms (with different weights) to softly prefer consecutive appointments and
+    # consecutive appointments with the same therapist.
+    model.Maximize(
+        sum(c for c, p, t, ts in consultations) +
+        bonus_weight * sum(bonus_vars) +
+        same_bonus_weight * sum(same_therapist_bonus_vars)
+    )
 
-    # Solve
+    # Solve the model.
     solver = cp_model.CpSolver()
     status = solver.Solve(model)
     print(f"Solver status: {solver.StatusName(status)}")
@@ -153,7 +188,13 @@ def create_schedule(patients: List[Patient], therapists: List[Therapist], timesl
         for consultation, patient, therapist, timeslot in consultations:
             if solver.Value(consultation):
                 schedule.append((patient, therapist, timeslot))
-        # Verification printout (optional)
+        # Optional: Print bonus information.
+        total_bonus = solver.Value(sum(bonus_vars)) if bonus_vars else 0
+        total_same_bonus = solver.Value(sum(same_therapist_bonus_vars)) if same_therapist_bonus_vars else 0
+        print(f"Total consecutive bonus: {total_bonus}")
+        print(f"Total same-therapist consecutive bonus: {total_same_bonus}")
+
+        # Verification (optional)
         for patient in patients:
             for specialty, hours_needed in patient.weekly_specialty_needs.items():
                 if hours_needed > 0:
@@ -163,9 +204,6 @@ def create_schedule(patients: List[Patient], therapists: List[Therapist], timesl
                         print(f"Error: {patient.name} has {num_consultations} {specialty} consultations, needs {expected}")
                     else:
                         print(f"Verified: {patient.name} has {num_consultations} {specialty} consultations, matches {expected}")
-        # (Optional) Print bonus value:
-        total_bonus = solver.Value(sum(bonus_vars))
-        print(f"Total consecutive bonus: {total_bonus}")
         return schedule
     else:
         print("No feasible schedule found.")
