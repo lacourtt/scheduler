@@ -1,5 +1,5 @@
 from flask import Flask, render_template, request, redirect, url_for
-from schedule_generator import HalfHour, WeekDay, Patient, Therapist, create_schedule
+from schedule_generator import HourSlot, WeekDay, Patient, Therapist, create_schedule
 from print_table import print_schedule_table  # Assuming this is your module
 
 app = Flask(__name__)
@@ -8,7 +8,7 @@ app = Flask(__name__)
 patients_cache = []
 therapists_cache = []
 
-# Time slots for scheduling (7:00 to 18:00 in half-hour increments)
+# Time slots for scheduling (7:00 to 18:00 in one-hour increments)
 timeslots = []
 slot_id = 1
 for day in WeekDay:
@@ -18,13 +18,13 @@ for day in WeekDay:
             "id": str(slot_id),
             "day_of_week": day.value,
             "start_time": current,
-            "end_time": current + 0.5
+            "end_time": current + 1.0
         })
         slot_id += 1
-        current += 0.5
+        current += 1.0
 
 def parse_availability(text):
-    """Parse availability text into a dictionary of day: [HalfHour] pairs."""
+    """Parse availability text into a dictionary of day: [HourSlot] pairs."""
     availability = {}
     lines = text.split("\n")
     for line in lines:
@@ -34,14 +34,17 @@ def parse_availability(text):
             if day not in [d.value for d in WeekDay]:
                 continue
             time_list = [t.strip() for t in times.split(",")]
-            half_hours = []
+            hour_slots = []
             for time in time_list:
-                for hh in HalfHour:
-                    if hh.value == time:
-                        half_hours.append(hh)
-                        break
-            if half_hours:
-                availability[day] = half_hours
+                try:
+                    hour = int(time.split(":")[0])
+                    if time == f"{hour:02d}:00" and 7 <= hour <= 17:
+                        slot_name = f"_{hour}to{hour+1}"
+                        hour_slots.append(getattr(HourSlot, slot_name))
+                except (ValueError, AttributeError):
+                    continue
+            if hour_slots:
+                availability[day] = hour_slots
     return availability
 
 @app.route('/', methods=['GET', 'POST'])

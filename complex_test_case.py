@@ -1,43 +1,38 @@
 import random
 from typing import List
-from schedule_generator import HalfHour
+from schedule_generator import HourSlot  # Updated import
 from csv_exporter import export_schedule_to_csv
 
-# Assuming print_schedule_table is updated to work with half-hour timeslots
-from schedule_generator import HalfHour, Patient, Therapist, WeekDay, create_schedule
+# Assuming print_schedule_table is updated to work with one-hour timeslots
+from schedule_generator import HourSlot, Patient, Therapist, WeekDay, create_schedule
 from print_table import print_consultations, print_schedule_table
 
-def create_half_hours_for_range(start_hour: float, end_hour: float) -> List[HalfHour]:
+def create_hour_slots_for_range(start_hour: float, end_hour: float) -> List[HourSlot]:
     """
-    Creates a list of HalfHour enums for a given time range.
+    Creates a list of HourSlot enums for a given time range.
     Args:
         start_hour: Start time (e.g., 7.0 for 7:00 AM).
         end_hour: End time (e.g., 18.0 for 6:00 PM).
     Returns:
-        List of HalfHour enums covering the range.
+        List of HourSlot enums covering the range.
     """
-    half_hours = []
-    current = start_hour
+    hour_slots = []
+    current = int(start_hour)
     while current < end_hour:
-        hour = int(current)
-        minute = 0 if current == hour else 30
-        time_str = f"{hour:02d}:{minute:02d}"
-        for hh in HalfHour:
-            if hh.value == time_str:
-                half_hours.append(hh)
-                break
-        current += 0.5
-    return half_hours
+        slot_name = f"_{current}to{current+1}"
+        hour_slots.append(getattr(HourSlot, slot_name))
+        current += 1
+    return hour_slots
 
-def generate_varied_availability(start_hour: float = 7.0, end_hour: float = 18.0) -> dict[str, List[HalfHour]]:
+def generate_varied_availability(start_hour: float = 7.0, end_hour: float = 18.0) -> dict[str, List[HourSlot]]:
     """
     Generates varied availability for a person across the week.
-    Each day has a random block of available hours (at least 4 hours, up to full day).
+    Each day has a random block of available hours (at least 2 hours, up to full day).
     Args:
         start_hour: Operating start hour (e.g., 7.0 for 7 AM).
         end_hour: Operating end hour (e.g., 18.0 for 6 PM).
     Returns:
-        Dict mapping day names to lists of available HalfHour slots.
+        Dict mapping day names to lists of available HourSlot slots.
     """
     availability = {}
     for day in WeekDay:
@@ -46,18 +41,18 @@ def generate_varied_availability(start_hour: float = 7.0, end_hour: float = 18.0
             availability[day.value] = []
             continue
 
-        # Choose a random start and end time for availability (minimum 4 hours)
-        possible_starts = list(range(int(start_hour), int(end_hour) - 4))
+        # Choose a random start and end time for availability (minimum 2 hours)
+        possible_starts = list(range(int(start_hour), int(end_hour) - 2))
         if not possible_starts:
             possible_starts = [int(start_hour)]
         start = random.choice(possible_starts)
-        min_end = min(start + 4, int(end_hour))
+        min_end = min(start + 2, int(end_hour))
         max_end = int(end_hour)
         end = random.randint(min_end, max_end)
 
-        # Generate half-hour slots for this range
-        half_hours = create_half_hours_for_range(float(start), float(end))
-        availability[day.value] = half_hours
+        # Generate one-hour slots for this range
+        hour_slots = create_hour_slots_for_range(float(start), float(end))
+        availability[day.value] = hour_slots
 
     return availability
 
@@ -110,7 +105,7 @@ def create_complex_test_case():
 
         # Adjust needs based on availability to increase likelihood of a feasible schedule
         patient_availability = generate_varied_availability()
-        total_available_hours = sum(len(half_hours) for half_hours in patient_availability.values()) / 2  # Convert half-hours to hours
+        total_available_hours = sum(len(hour_slots) for hour_slots in patient_availability.values())  # Each slot is 1 hour
         total_needs = sum(needs.values())
         if total_needs > total_available_hours:
             # Scale down needs proportionally to fit availability
@@ -128,7 +123,7 @@ def create_complex_test_case():
             availability=patient_availability
         ))
 
-    # Define time slots as half-hour blocks from 7:00 to 18:00, Monday to Friday.
+    # Define time slots as one-hour blocks from 7:00 to 18:00, Monday to Friday.
     timeslots = []
     slot_id = 1
     for day in WeekDay:
@@ -138,13 +133,12 @@ def create_complex_test_case():
                 "id": str(slot_id),
                 "day_of_week": day.value,
                 "start_time": current,
-                "end_time": current + 0.5
+                "end_time": current + 1.0
             })
             slot_id += 1
-            current += 0.5
+            current += 1.0
 
     return patients, therapists, timeslots
-
 
 if __name__ == "__main__":
     patients, therapists, timeslots = create_complex_test_case()

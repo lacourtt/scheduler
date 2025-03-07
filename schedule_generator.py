@@ -3,36 +3,19 @@ from ortools.sat.python import cp_model
 from typing import List, Dict
 import random
 
-class HalfHour(Enum):
-    """Represents operating hours from 6 AM to 7 PM in half-hour increments."""
-    # Morning hours (6 AM - 12 PM)
-    _6to6_30 = "06:00"
-    _6_30to7 = "06:30"
-    _7to7_30 = "07:00"
-    _7_30to8 = "07:30"
-    _8to8_30 = "08:00"
-    _8_30to9 = "08:30"
-    _9to9_30 = "09:00"
-    _9_30to10 = "09:30"
-    _10to10_30 = "10:00"
-    _10_30to11 = "10:30"
-    _11to11_30 = "11:00"
-    _11_30to12 = "11:30"
-    # Afternoon hours (12 PM - 7 PM)
-    _12to12_30 = "12:00"
-    _12_30to13 = "12:30"
-    _13to13_30 = "13:00"
-    _13_30to14 = "13:30"
-    _14to14_30 = "14:00"
-    _14_30to15 = "14:30"
-    _15to15_30 = "15:00"
-    _15_30to16 = "15:30"
-    _16to16_30 = "16:00"
-    _16_30to17 = "16:30"
-    _17to17_30 = "17:00"
-    _17_30to18 = "17:30"
-    _18to18_30 = "18:00"
-    _18_30to19 = "18:30"
+class HourSlot(Enum):
+    """Represents operating hours from 7 AM to 6 PM in one-hour increments."""
+    _7to8 = "07:00 - 08:00"
+    _8to9 = "08:00 - 09:00"
+    _9to10 = "09:00 - 10:00"
+    _10to11 = "10:00 - 11:00"
+    _11to12 = "11:00 - 12:00"
+    _12to13 = "12:00 - 13:00"
+    _13to14 = "13:00 - 14:00"
+    _14to15 = "14:00 - 15:00"
+    _15to16 = "15:00 - 16:00"
+    _16to17 = "16:00 - 17:00"
+    _17to18 = "17:00 - 18:00"
 
 class WeekDay(Enum):
     """Represents days of the week (Monday to Friday)."""
@@ -48,7 +31,7 @@ class Patient:
         self.id = id
         self.name = name
         self.weekly_specialty_needs = weekly_specialty_needs  # e.g., {"Speech Therapist": 2}
-        self.availability = availability  # e.g., {"Monday": [HalfHour._9to9_30, HalfHour._9_30to10]}
+        self.availability = availability  # e.g., {"Monday": [HourSlot._9to10, HourSlot._10to11]}
 
 class Therapist:
     """Represents a therapist with a specialty and availability."""
@@ -56,7 +39,7 @@ class Therapist:
         self.id = id
         self.name = name
         self.specialty = specialty
-        self.availability = availability  # e.g., {"Monday": [HalfHour._9to9_30, HalfHour._9_30to10]}
+        self.availability = availability  # e.g., {"Monday": [HourSlot._9to10, HourSlot._10to11]}
 
 class Consultation:
     """Represents a scheduled consultation."""
@@ -64,27 +47,17 @@ class Consultation:
         self.id = id
         self.patient = patient
         self.therapist = therapist
-        self.timeslot = timeslot  # e.g., {"id": "1", "day_of_week": "Monday", "start_time": 9.0, "end_time": 9.5}
+        self.timeslot = timeslot  # e.g., {"id": "1", "day_of_week": "Monday", "start_time": 9.0, "end_time": 10.0}
 
-def get_half_hours_covered(timeslot: dict) -> list[HalfHour]:
-    """Returns the list of HalfHour enums covered by a time slot."""
-    start = timeslot["start_time"]  # e.g., 9.0
-    end = timeslot["end_time"]      # e.g., 9.5 for a half-hour slot
-    half_hours = []
-    current = start
-    while current < end:
-        hour = int(current)
-        minute = 0 if current == hour else 30
-        time_str = f"{hour:02d}:{minute:02d}"
-        for hh in HalfHour:
-            if hh.value == time_str:
-                half_hours.append(hh)
-                break
-        current += 0.5
-    return half_hours
+def get_hour_slot(start_time: float) -> HourSlot:
+    """Returns the HourSlot corresponding to a timeslot's start time."""
+    hour = int(start_time)
+    slot_name = f"_{hour}to{hour+1}"
+    return getattr(HourSlot, slot_name)
 
-def create_schedule(patients: list[Patient], therapists: list[Therapist], timeslots: list[dict]) -> list[tuple]:
+def create_schedule(patients: List[Patient], therapists: List[Therapist], timeslots: List[dict]) -> List[tuple]:
     model = cp_model.CpModel()
+    bonus_weight = 1  # Weight for the consecutive scheduling bonus
 
     # Create consultation variables
     consultations = []
@@ -99,13 +72,13 @@ def create_schedule(patients: list[Patient], therapists: list[Therapist], timesl
     # Availability constraints
     for consultation, patient, therapist, timeslot in consultations:
         day = timeslot["day_of_week"]
-        covered_half_hours = get_half_hours_covered(timeslot)
-        patient_available = all(hh in patient.availability.get(day, []) for hh in covered_half_hours)
-        therapist_available = all(hh in therapist.availability.get(day, []) for hh in covered_half_hours)
+        hour_slot = get_hour_slot(timeslot["start_time"])
+        patient_available = hour_slot in patient.availability.get(day, [])
+        therapist_available = hour_slot in therapist.availability.get(day, [])
         if not (patient_available and therapist_available):
             model.Add(consultation == 0)
 
-    # No double-booking constraints
+    # No double-booking constraints (for each timeslot, a patient and a therapist can have at most one consultation)
     for timeslot in timeslots:
         for therapist in therapists:
             overlapping = [c for c, p, t, ts in consultations if t == therapist and ts == timeslot]
@@ -114,39 +87,85 @@ def create_schedule(patients: list[Patient], therapists: list[Therapist], timesl
             overlapping = [c for c, p, t, ts in consultations if p == patient and ts == timeslot]
             model.Add(sum(overlapping) <= 1)
 
-    # Weekly needs constraints
+    # Weekly needs constraints: For each patient and specialty, schedule exactly the required number of consultations.
     for patient in patients:
         for specialty, hours_needed in patient.weekly_specialty_needs.items():
             if hours_needed > 0:
                 relevant_consultations = [c for c, p, t, ts in consultations if p == patient and t.specialty == specialty]
                 if not relevant_consultations:
                     print(f"Warning: No consultations possible for {patient.name} with {specialty}")
-                model.Add(sum(relevant_consultations) == hours_needed * 2)
+                model.Add(sum(relevant_consultations) == hours_needed)
 
-    # Objective
-    model.Maximize(sum(c for c, p, t, ts in consultations))
+    # ***** Soft Constraint for Consecutive Appointments *****
+    # First, create auxiliary variables that indicate whether a patient is scheduled in a given timeslot.
+    scheduled = {}  # key: (patient.id, timeslot["id"]) -> IntVar in {0,1}
+    for patient in patients:
+        for ts in timeslots:
+            var = model.NewIntVar(0, 1, f'scheduled_{patient.id}_{ts["id"]}')
+            # Sum over all consultations for this patient in this timeslot (at most one due to double-booking).
+            relevant = [c for c, p, t, ts_candidate in consultations if p == patient and ts_candidate == ts]
+            if relevant:
+                model.Add(var == sum(relevant))
+            else:
+                model.Add(var == 0)
+            scheduled[(patient.id, ts["id"])] = var
+
+    # For each patient and each day, reward consecutive appointments.
+    bonus_vars = []
+    # Group timeslots by day.
+    timeslots_by_day = {}
+    for ts in timeslots:
+        day = ts["day_of_week"]
+        timeslots_by_day.setdefault(day, []).append(ts)
+    # Sort timeslots by start time for each day.
+    for day, ts_list in timeslots_by_day.items():
+        ts_list.sort(key=lambda x: x["start_time"])
+    # For each patient and each day, for each adjacent pair of timeslots, create a bonus variable.
+    for patient in patients:
+        for day, ts_list in timeslots_by_day.items():
+            # Only consider days where the patient is available (or could be scheduled).
+            if day not in patient.availability:
+                continue
+            for i in range(len(ts_list) - 1):
+                ts1 = ts_list[i]
+                ts2 = ts_list[i+1]
+                bonus_var = model.NewIntVar(0, 1, f'bonus_{patient.id}_{ts1["id"]}_{ts2["id"]}')
+                s1 = scheduled[(patient.id, ts1["id"])]
+                s2 = scheduled[(patient.id, ts2["id"])]
+                # Linearize the product: bonus_var == 1 if and only if both s1 and s2 are 1.
+                model.Add(bonus_var <= s1)
+                model.Add(bonus_var <= s2)
+                model.Add(bonus_var >= s1 + s2 - 1)
+                bonus_vars.append(bonus_var)
+
+    # Modify the objective.
+    # The sum over scheduled consultations is fixed by the hard constraints.
+    # So we add the bonus terms to encourage consecutive appointments.
+    model.Maximize(sum(c for c, p, t, ts in consultations) + bonus_weight * sum(bonus_vars))
 
     # Solve
     solver = cp_model.CpSolver()
     status = solver.Solve(model)
     print(f"Solver status: {solver.StatusName(status)}")
 
-    if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+    if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
         schedule = []
         for consultation, patient, therapist, timeslot in consultations:
             if solver.Value(consultation):
                 schedule.append((patient, therapist, timeslot))
-
-        # Verify the schedule
+        # Verification printout (optional)
         for patient in patients:
             for specialty, hours_needed in patient.weekly_specialty_needs.items():
                 if hours_needed > 0:
                     num_consultations = sum(1 for p, t, ts in schedule if p == patient and t.specialty == specialty)
-                    expected = hours_needed * 2
+                    expected = hours_needed
                     if num_consultations != expected:
                         print(f"Error: {patient.name} has {num_consultations} {specialty} consultations, needs {expected}")
                     else:
                         print(f"Verified: {patient.name} has {num_consultations} {specialty} consultations, matches {expected}")
+        # (Optional) Print bonus value:
+        total_bonus = solver.Value(sum(bonus_vars))
+        print(f"Total consecutive bonus: {total_bonus}")
         return schedule
     else:
         print("No feasible schedule found.")

@@ -21,8 +21,8 @@
             <p>Speech Therapist Hours: <input type="text" name="speech_hours" value="0"></p>
             <p>Psychologist Hours: <input type="text" name="psycho_hours" value="0"></p>
             <p>Occupational Therapist Hours: <input type="text" name="occ_hours" value="0"></p>
-            <p>Availability (e.g., Monday: 08:00, 08:30):</p>
-            <textarea name="patient_availability"></textarea>
+            <p>Availability (e.g., "Monday: 09:00, 10:00" for slots 09:00-10:00 and 10:00-11:00):</p>
+            <textarea name="patient_availability" placeholder="Monday: 09:00, 10:00"></textarea>
             <p><input type="submit" value="Add Patient"></p>
         </form>
     </div>
@@ -39,8 +39,8 @@
                     <option value="Occupational Therapist">Occupational Therapist</option>
                 </select>
             </p>
-            <p>Availability (e.g., Monday: 08:00, 08:30):</p>
-            <textarea name="therapist_availability"></textarea>
+            <p>Availability (e.g., "Monday: 09:00, 10:00" for slots 09:00-10:00 and 10:00-11:00):</p>
+            <textarea name="therapist_availability" placeholder="Monday: 09:00, 10:00"></textarea>
             <p><input type="submit" value="Add Therapist"></p>
         </form>
     </div>
@@ -73,7 +73,7 @@
                 <li class="entry">
                     {{ therapist.name }} ({{ therapist.specialty }}) (ID: {{ therapist.id }})
                     <form method="POST" style="display:inline;">
-                        "input type="hidden" name="action" value="delete_therapist">
+                        <input type="hidden" name="action" value="delete_therapist">
                         <input type="hidden" name="therapist_id" value="{{ therapist.id }}">
                         <input type="submit" value="Delete" onclick="return confirm('Delete {{ therapist.name }}?');">
                     </form>

@@ -1,4 +1,4 @@
-from schedule_generator import Patient, Therapist, HalfHour, WeekDay, create_schedule
+from schedule_generator import Patient, Therapist, HourSlot, WeekDay, create_schedule
 
 def float_to_time(f):
     """Convert a float time to a string in HH:MM format."""
@@ -17,7 +17,7 @@ def print_consultations(schedule, timeslots):
     # Function to convert float time to string (e.g., 8.0 -> "08:00")
     def time_to_str(time_float):
         hour = int(time_float)
-        minute = "00" if time_float == hour else "30"
+        minute = "00"
         return f"{hour:02d}:{minute}"
     
     # Iterate through each patient
@@ -95,12 +95,10 @@ def get_initials(text):
 if __name__ == "__main__":
     # Define availability in terms of HalfHour enums
     morning_half_hours = [
-        HalfHour._9to9_30, HalfHour._9_30to10,
-        HalfHour._10to10_30, HalfHour._10_30to11,
-        HalfHour._11to11_30, HalfHour._11_30to12
+        HourSlot._9to10,HourSlot._10to11, HourSlot._11to12
     ]
     morning_half_hours_2 = [
-        HalfHour._9to9_30, HalfHour._9_30to10, HalfHour._11_30to12
+        HourSlot._9to10, HourSlot._10to11, HourSlot._11to12
     ]
     
     # Define sample timeslots (Monday and Tuesday, 9:00-12:00)
